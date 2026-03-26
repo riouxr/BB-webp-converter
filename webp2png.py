@@ -12,8 +12,8 @@ from PIL import Image
 
 def convert_file(src: Path, fmt: str) -> tuple[bool, str]:
     """Convert a single WebP file to PNG or JPG. Returns (success, message)."""
-    if src.suffix.lower() != ".webp":
-        return False, f"Skipped (not .webp): {src.name}"
+    if src.suffix.lower() not in (".webp", ".avif"):
+        return False, f"Skipped (not .webp/.avif): {src.name}"
     ext = ".jpg" if fmt == "JPG" else ".png"
     dst = src.with_suffix(ext)
     try:
@@ -53,7 +53,7 @@ def parse_dropped(data: str) -> list[Path]:
                 break
             paths.append(Path(raw[i:end]))
             i = end + 1
-    return [p for p in paths if p.suffix.lower() == ".webp"]
+    return [p for p in paths if p.suffix.lower() in (".webp", ".avif")]
 
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ class App(TkinterDnD.Tk):
         self._arrow.pack(pady=(20, 4))
 
         self._drop_title = Label(inner,
-                                 text="Drop .webp files here",
+                                 text="Drop .webp or .avif files here",
                                  font=("Segoe UI", 12, "bold"),
                                  bg=self.CARD, fg=self.TEXT)
         self._drop_title.pack()
@@ -239,7 +239,7 @@ class App(TkinterDnD.Tk):
         self._log_text.tag_config("head", foreground=self.YELLOW)
 
         self._ok_count = self._err_count = 0
-        self._log("Ready — drop some .webp files above.", "info")
+        self._log("Ready — drop .webp or .avif files above.", "info")
 
     # ── toggle ──────────────────────────────────────────────────────────────
 
