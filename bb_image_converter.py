@@ -7,30 +7,45 @@ from tkinter import font
 from tkinterdnd2 import DND_FILES, TkinterDnD
 from PIL import Image
 
+# All extensions Pillow can read, built at import time (e.g. .webp, .tga, .bmp, …)
+SUPPORTED_EXTS: frozenset[str] = frozenset(Image.registered_extensions().keys())
+
+# Output formats: name -> (file_ext, pillow_format, flatten_alpha, save_kwargs)
+#   flatten_alpha=True  → transparency is composited onto a white background
+#   flatten_alpha=False → alpha channel is preserved as-is
+OUTPUT_FORMATS: dict[str, tuple[str, str, bool, dict]] = {
+    "PNG":  (".png",  "PNG",  False, {}),
+    "JPEG": (".jpg",  "JPEG", True,  {"quality": 95}),
+    "WebP": (".webp", "WEBP", False, {"quality": 95}),
+    "BMP":  (".bmp",  "BMP",  True,  {}),
+    "TIFF": (".tiff", "TIFF", False, {}),
+    "TGA":  (".tga",  "TGA",  False, {}),
+    "GIF":  (".gif",  "GIF",  True,  {}),
+}
+
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
 def convert_file(src: Path, fmt: str) -> tuple[bool, str]:
-    """Convert a single WebP file to PNG or JPG. Returns (success, message)."""
-    if src.suffix.lower() not in (".webp", ".avif"):
-        return False, f"Skipped (not .webp/.avif): {src.name}"
-    ext = ".jpg" if fmt == "JPG" else ".png"
+    """Convert any Pillow-readable image to the chosen output format."""
+    if src.suffix.lower() not in SUPPORTED_EXTS:
+        return False, f"Skipped (unsupported format): {src.name}"
+
+    ext, pil_fmt, flatten, kwargs = OUTPUT_FORMATS[fmt]
     dst = src.with_suffix(ext)
     try:
         with Image.open(src) as img:
-            if fmt == "JPG":
-                # JPG doesn't support transparency — flatten onto white bg
-                if img.mode in ("RGBA", "LA", "P"):
+            if flatten:
+                # Flatten transparency onto a white background
+                if img.mode == "P":
+                    img = img.convert("RGBA")
+                if img.mode in ("RGBA", "LA", "PA"):
                     bg = Image.new("RGB", img.size, (255, 255, 255))
-                    if img.mode == "P":
-                        img = img.convert("RGBA")
-                    bg.paste(img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None)
+                    bg.paste(img, mask=img.split()[-1])
                     img = bg
-                else:
+                elif img.mode != "RGB":
                     img = img.convert("RGB")
-                img.save(dst, "JPEG", quality=95)
-            else:
-                img.save(dst, "PNG")
+            img.save(dst, pil_fmt, **kwargs)
         return True, f"✓  {src.name}  →  {dst.name}"
     except Exception as e:
         return False, f"✗  {src.name}  —  {e}"
@@ -53,7 +68,7 @@ def parse_dropped(data: str) -> list[Path]:
                 break
             paths.append(Path(raw[i:end]))
             i = end + 1
-    return [p for p in paths if p.suffix.lower() in (".webp", ".avif")]
+    return [p for p in paths if p.suffix.lower() in SUPPORTED_EXTS]
 
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
@@ -63,8 +78,6 @@ class App(TkinterDnD.Tk):
     PANEL  = "#17172a"
     CARD   = "#1e1e35"
     ACCENT = "#7c3aed"
-    SEL_PNG= "#7c3aed"
-    SEL_JPG= "#0ea5e9"
     GREEN  = "#4ade80"
     RED    = "#f87171"
     YELLOW = "#fbbf24"
@@ -75,9 +88,9 @@ class App(TkinterDnD.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("BB Webp Converter")
-        self.geometry("640x560")
-        self.minsize(500, 420)
+        self.title("BB Image Converter")
+        self.geometry("640x580")
+        self.minsize(520, 440)
         self.configure(bg=self.DARK)
         self.resizable(True, True)
 
@@ -85,7 +98,7 @@ class App(TkinterDnD.Tk):
 
         self.update_idletasks()
         x = (self.winfo_screenwidth()  - 640) // 2
-        y = (self.winfo_screenheight() - 560) // 2
+        y = (self.winfo_screenheight() - 580) // 2
         self.geometry(f"+{x}+{y}")
 
         self._build_ui()
@@ -101,41 +114,38 @@ class App(TkinterDnD.Tk):
         hdr.pack_propagate(False)
 
         hdr_left = Frame(hdr, bg=self.PANEL)
-        hdr_left.pack(side=LEFT, padx=20)
+        hdr_left.pack(side=LEFT, padx=20, fill=Y)
 
         dot = Canvas(hdr_left, width=10, height=10, bg=self.PANEL,
                      highlightthickness=0)
         dot.pack(side=LEFT, padx=(0, 9))
         dot.create_oval(0, 0, 10, 10, fill=self.ACCENT, outline="")
 
-        Label(hdr_left, text="BB Webp Converter",
+        Label(hdr_left, text="BB Image Converter",
               bg=self.PANEL, fg=self.TEXT,
               font=("Segoe UI", 14, "bold")).pack(side=LEFT)
 
-        # right: PNG / JPG toggle pill
-        toggle_wrap = Frame(hdr, bg=self.PANEL)
-        toggle_wrap.pack(side=RIGHT, padx=20)
+        # ── format bar ──────────────────────────────────────────────────────
+        fmt_bar = Frame(self, bg=self.PANEL)
+        fmt_bar.pack(fill=X)
 
-        Label(toggle_wrap, text="Output format",
+        Label(fmt_bar, text="Output format",
               bg=self.PANEL, fg=self.MUTED,
-              font=("Segoe UI", 8)).pack(anchor=E)
+              font=("Segoe UI", 8)).pack(side=LEFT, padx=(22, 10), pady=(0, 8))
 
-        pill = Frame(toggle_wrap, bg=self.BORDER, padx=2, pady=2)
-        pill.pack()
+        pill = Frame(fmt_bar, bg=self.BORDER, padx=2, pady=2)
+        pill.pack(side=LEFT, pady=(0, 8))
 
-        self._btn_png = Label(pill, text="  PNG  ",
-                              font=("Segoe UI", 9, "bold"),
-                              pady=5, cursor="hand2")
-        self._btn_png.pack(side=LEFT)
+        self._fmt_btns: dict[str, Label] = {}
+        for name in OUTPUT_FORMATS:
+            btn = Label(pill, text=f"  {name}  ",
+                        font=("Segoe UI", 9, "bold"),
+                        pady=4, cursor="hand2")
+            btn.pack(side=LEFT)
+            btn.bind("<Button-1>", lambda _, n=name: self._set_fmt(n))
+            self._fmt_btns[name] = btn
 
-        self._btn_jpg = Label(pill, text="  JPG  ",
-                              font=("Segoe UI", 9, "bold"),
-                              pady=5, cursor="hand2")
-        self._btn_jpg.pack(side=LEFT)
-
-        self._btn_png.bind("<Button-1>", lambda _: self._set_fmt("PNG"))
-        self._btn_jpg.bind("<Button-1>", lambda _: self._set_fmt("JPG"))
-        self._refresh_toggle()
+        self._refresh_fmt_btns()
 
         # accent line
         self._accent_line = Frame(self, bg=self.ACCENT, height=2)
@@ -160,7 +170,7 @@ class App(TkinterDnD.Tk):
         self._arrow.pack(pady=(20, 4))
 
         self._drop_title = Label(inner,
-                                 text="Drop .webp or .avif files here",
+                                 text="Drop any image file here",
                                  font=("Segoe UI", 12, "bold"),
                                  bg=self.CARD, fg=self.TEXT)
         self._drop_title.pack()
@@ -239,33 +249,24 @@ class App(TkinterDnD.Tk):
         self._log_text.tag_config("head", foreground=self.YELLOW)
 
         self._ok_count = self._err_count = 0
-        self._log("Ready — drop .webp or .avif files above.", "info")
+        self._log("Ready — drop any image file above.", "info")
 
-    # ── toggle ──────────────────────────────────────────────────────────────
+    # ── format selector ─────────────────────────────────────────────────────
 
     def _set_fmt(self, fmt: str):
         self._fmt.set(fmt)
-        self._refresh_toggle()
-        self._drop_sub.configure(
-            text=f".{fmt.lower()} saved next to originals"
-        )
+        ext = OUTPUT_FORMATS[fmt][0]
+        self._drop_sub.configure(text=f"{ext} saved next to originals")
+        self._refresh_fmt_btns()
 
-    def _refresh_toggle(self):
-        fmt = self._fmt.get()
-        active = self.SEL_PNG if fmt == "PNG" else self.SEL_JPG
-
-        self._btn_png.configure(
-            bg=active    if fmt == "PNG" else self.CARD,
-            fg=self.TEXT if fmt == "PNG" else self.MUTED,
-        )
-        self._btn_jpg.configure(
-            bg=active    if fmt == "JPG" else self.CARD,
-            fg=self.TEXT if fmt == "JPG" else self.MUTED,
-        )
-        if hasattr(self, "_arrow"):
-            self._arrow.configure(fg=active)
-        if hasattr(self, "_accent_line"):
-            self._accent_line.configure(bg=active)
+    def _refresh_fmt_btns(self):
+        current = self._fmt.get()
+        for name, btn in self._fmt_btns.items():
+            active = name == current
+            btn.configure(
+                bg=self.ACCENT if active else self.CARD,
+                fg=self.TEXT   if active else self.MUTED,
+            )
 
     # ── drag feedback ────────────────────────────────────────────────────────
 
@@ -276,20 +277,18 @@ class App(TkinterDnD.Tk):
         return [self.drop_zone] + kids
 
     def _on_enter(self, event):
-        active = self.SEL_PNG if self._fmt.get() == "PNG" else self.SEL_JPG
-        self.drop_zone.configure(highlightbackground=active)
+        self.drop_zone.configure(highlightbackground=self.ACCENT)
         for w in self._drop_widgets():
             try: w.configure(bg=self.HOVER)
             except: pass
-        self._arrow.configure(fg=active)
+        self._arrow.configure(fg=self.ACCENT)
 
     def _on_leave(self, event):
         self.drop_zone.configure(highlightbackground=self.BORDER)
         for w in self._drop_widgets():
             try: w.configure(bg=self.CARD)
             except: pass
-        active = self.SEL_PNG if self._fmt.get() == "PNG" else self.SEL_JPG
-        self._arrow.configure(fg=active)
+        self._arrow.configure(fg=self.ACCENT)
 
     # ── drop handler ─────────────────────────────────────────────────────────
 
@@ -297,7 +296,7 @@ class App(TkinterDnD.Tk):
         self._on_leave(event)
         files = parse_dropped(event.data)
         if not files:
-            self._log("No .webp files found in drop.", "info")
+            self._log("No supported image files found in drop.", "info")
             return
         fmt = self._fmt.get()
         threading.Thread(

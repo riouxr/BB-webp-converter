@@ -1,6 +1,6 @@
-# BB Webp Converter
+# BB Image Converter
 
-A lightweight drag-and-drop desktop app for converting `.webp` and `.avif` images to **PNG** or **JPG** on Windows — no FFmpeg, no dependencies, no installation required for end users.
+A lightweight drag-and-drop desktop app for converting images to **PNG** or **JPG** on Windows — supports any format Pillow can read (WebP, AVIF, TGA, BMP, GIF, TIFF, PSD, ICO, and more). No FFmpeg, no dependencies, no installation required for end users.
 
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?style=flat-square&logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey?style=flat-square&logo=windows)
@@ -10,7 +10,7 @@ A lightweight drag-and-drop desktop app for converting `.webp` and `.avif` image
 
 ## Features
 
-- **Drag & drop** — drop one or many `.webp` or `.avif` files at once
+- **Drag & drop** — drop one or many image files at once
 - **PNG or JPG output** — toggle between formats in one click
 - **Saves in place** — output files are written next to the originals, same filename, new extension
 - **Transparency-aware** — JPG conversions automatically flatten transparent areas onto a white background
@@ -23,22 +23,22 @@ A lightweight drag-and-drop desktop app for converting `.webp` and `.avif` image
 
 ```
 ┌─────────────────────────────────────────────┐
-│  ● BB Webp Converter          Output format │
+│  ● BB Image Converter         Output format │
 │                               [ PNG ][ JPG ]│
 ├─────────────────────────────────────────────┤
 │                                             │
 │                    ⬇                        │
-│           Drop .webp or .avif files here    │
+│            Drop any image file here         │
 │       .png saved next to originals          │
 │                                             │
 ├─────────────────────────────────────────────┤
 │  ✓ 3 converted   ✗ 0 errors        Clear   │
 ├─────────────────────────────────────────────┤
-│  Ready — drop some .webp files above.       │
+│  Ready — drop any image file above.         │
 │  ── Converting 3 file(s) to PNG ──          │
-│  ✓  photo1.webp  →  photo1.png              │
-│  ✓  banner.webp  →  banner.png              │
-│  ✓  icon.webp    →  icon.png                │
+│  ✓  photo.webp   →  photo.png               │
+│  ✓  banner.tga   →  banner.png              │
+│  ✓  icon.bmp     →  icon.png                │
 │  ── Done ──                                 │
 └─────────────────────────────────────────────┘
 ```
@@ -53,7 +53,7 @@ You need **Python 3.9+** installed. That's it.
 
 1. Clone or download this repo
 2. Double-click **`build_exe.bat`**
-3. Find your app at **`dist\BBWebpConverter.exe`**
+3. Find your app at **`dist\BBImageConverter.exe`**
 
 The `.exe` is fully self-contained — copy it anywhere, share it with anyone.
 
@@ -61,7 +61,7 @@ The `.exe` is fully self-contained — copy it anywhere, share it with anyone.
 
 ```bash
 pip install -r requirements.txt
-python webp2png.py
+python bb_image_converter.py
 ```
 
 ---
@@ -74,7 +74,7 @@ python webp2png.py
 1. Verifies Python is available
 2. pip installs all dependencies
 3. Calls PyInstaller with the correct flags
-4. Outputs dist\BBWebpConverter.exe
+4. Outputs dist\BBImageConverter.exe
 ```
 
 Build time is roughly 30–60 seconds. The resulting `.exe` is ~15–20 MB (Python runtime + Pillow bundled in).
@@ -83,7 +83,7 @@ Build time is roughly 30–60 seconds. The resulting `.exe` is ~15–20 MB (Pyth
 
 ## How it works
 
-- **No FFmpeg** — conversion is handled entirely by [Pillow](https://python-pillow.org/), which supports WebP (lossy, lossless, animated) and AVIF via the `pillow-avif-plugin` or Pillow's built-in AVIF support (Pillow ≥ 9.1 with libavif)
+- **No FFmpeg** — conversion is handled entirely by [Pillow](https://python-pillow.org/), which supports a wide range of formats out of the box. Supported input formats are detected automatically at runtime via `Image.registered_extensions()`.
 - **Drag & drop** — powered by [tkinterdnd2](https://github.com/pmgagne/tkinterdnd2), wrapping the TkDnD2 Tcl extension
 - **Packaging** — [PyInstaller](https://pyinstaller.org/) bundles Python, Pillow, tkinterdnd2, and the Tcl/Tk runtime into a single executable
 
@@ -106,9 +106,10 @@ End users need **nothing** installed.
 
 ```
 bb-webp-converter/
-├── webp2png.py          # Application source
-├── build_exe.bat        # One-click Windows build script
-├── requirements.txt     # Python dependencies
+├── bb_image_converter.py   # Application source
+├── BBImageConverter.spec   # PyInstaller spec file
+├── build_exe.bat           # One-click Windows build script
+├── requirements.txt        # Python dependencies
 └── README.md
 ```
 

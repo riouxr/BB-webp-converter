@@ -1,0 +1,11 @@
+# Build artifacts
+build/
+dist/
+*.spec.bak
+
+# PyInstaller
+__pycache__/
+*.py[cod]
+
+# Claude Code internals
+.claude/

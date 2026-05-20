@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableDelayedExpansion
-title BB Webp Converter - Build
+title BB Image Converter - Build
 
 echo.
 echo  ================================================
-echo   BB Webp Converter  --  Build Script
+echo   BB Image Converter  --  Build Script
 echo  ================================================
 echo.
 
@@ -45,12 +45,12 @@ echo.
 python -m PyInstaller ^
     --onefile ^
     --windowed ^
-    --name "BBWebpConverter" ^
+    --name "BBImageConverter" ^
     --add-data "%TKDND_DIR%\tkdnd;tkinterdnd2/tkdnd" ^
     --hidden-import="PIL._tkinter_finder" ^
     --hidden-import="tkinterdnd2" ^
     --collect-all tkinterdnd2 ^
-    webp2png.py
+    bb_image_converter.py
 
 if errorlevel 1 (
     echo.
@@ -63,7 +63,7 @@ echo  ================================================
 echo   BUILD COMPLETE!
 echo  ================================================
 echo.
-echo  Your app is at:  dist\BBWebpConverter.exe
+echo  Your app is at:  dist\BBImageConverter.exe
 echo.
 echo  Drop it anywhere on your PC and run it.
 echo  No installation, no FFmpeg, no Python needed!
