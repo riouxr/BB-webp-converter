@@ -21,7 +21,7 @@ A lightweight drag-and-drop desktop app for converting images on Windows. Accept
 
 ## Screenshot
 
-![BB Image Converter](screenshot.png)
+![BB Image Converter](BBImageConverter.webp)
 
 ---
 
