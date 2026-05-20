@@ -21,35 +21,17 @@ A lightweight drag-and-drop desktop app for converting images on Windows. Accept
 
 ## Screenshot
 
-```
-┌──────────────────────────────────────────────────────┐
-│  ● BB Image Converter                                │
-├──────────────────────────────────────────────────────┤
-│  Output format                                       │
-│  [ PNG ][ JPEG ][ WebP ][ BMP ][ TIFF ][ TGA ][ GIF ]│
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│                       ⬇                             │
-│              Drop any image file here                │
-│          .png saved next to originals                │
-│                                                      │
-├──────────────────────────────────────────────────────┤
-│  ✓ 3 converted   ✗ 0 errors               Clear     │
-├──────────────────────────────────────────────────────┤
-│  Ready — drop any image file above.                  │
-│  ── Converting 3 file(s) to PNG ──                   │
-│  ✓  photo.webp   →  photo.png                        │
-│  ✓  banner.tga   →  banner.png                       │
-│  ✓  icon.bmp     →  icon.png                         │
-│  ── Done ──                                          │
-└──────────────────────────────────────────────────────┘
-```
+![BB Image Converter](screenshot.png)
 
 ---
 
 ## Getting the app
 
-### Option A — Build it yourself (recommended)
+### Option A — Download the latest release (easiest)
+
+Head to the [**Releases page**](https://github.com/riouxr/BB-webp-converter/releases/latest) and download **`BBImageConverter.exe`** from the latest release. That's it — no installation, no Python needed. Just run it.
+
+### Option B — Build it yourself
 
 You need **Python 3.9+** installed. That's it.
 
@@ -59,7 +41,7 @@ You need **Python 3.9+** installed. That's it.
 
 The `.exe` is fully self-contained — copy it anywhere, share it with anyone.
 
-### Option B — Run from source
+### Option C — Run from source
 
 ```bash
 pip install -r requirements.txt
