@@ -26,12 +26,32 @@ OUTPUT_FORMATS: dict[str, tuple[str, str, bool, dict]] = {
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
-def convert_file(src: Path, fmt: str) -> tuple[bool, str]:
+def collect_files(paths: list[Path], recursive: bool) -> list[Path]:
+    """Expand a mixed list of files and folders into supported image files."""
+    result = []
+    for p in paths:
+        if p.is_dir():
+            pattern = "**/*" if recursive else "*"
+            for f in sorted(p.glob(pattern)):
+                if f.is_file() and f.suffix.lower() in SUPPORTED_EXTS:
+                    result.append(f)
+        elif p.is_file() and p.suffix.lower() in SUPPORTED_EXTS:
+            result.append(p)
+    return result
+
+
+def convert_file(src: Path, fmt: str,
+                 delete_original: bool = False) -> tuple[bool, str]:
     """Convert any Pillow-readable image to the chosen output format."""
     if src.suffix.lower() not in SUPPORTED_EXTS:
         return False, f"Skipped (unsupported format): {src.name}"
 
     ext, pil_fmt, flatten, kwargs = OUTPUT_FORMATS[fmt]
+
+    # Skip if the file is already in the target format
+    if src.suffix.lower() == ext:
+        return False, f"Skipped (already {fmt}): {src.name}"
+
     dst = src.with_suffix(ext)
     try:
         with Image.open(src) as img:
@@ -46,13 +66,19 @@ def convert_file(src: Path, fmt: str) -> tuple[bool, str]:
                 elif img.mode != "RGB":
                     img = img.convert("RGB")
             img.save(dst, pil_fmt, **kwargs)
+
+        if delete_original:
+            src.unlink()
+            return True, f"✓  {src.name}  →  {dst.name}  (original deleted)"
+
         return True, f"✓  {src.name}  →  {dst.name}"
     except Exception as e:
         return False, f"✗  {src.name}  —  {e}"
 
 
 def parse_dropped(data: str) -> list[Path]:
-    """Parse the string returned by tkdnd (handles spaces in filenames)."""
+    """Parse the string returned by tkdnd (handles spaces in filenames).
+    Returns both folders and supported image files."""
     paths = []
     raw = data.strip()
     i = 0
@@ -68,7 +94,8 @@ def parse_dropped(data: str) -> list[Path]:
                 break
             paths.append(Path(raw[i:end]))
             i = end + 1
-    return [p for p in paths if p.suffix.lower() in SUPPORTED_EXTS]
+    return [p for p in paths
+            if p.is_dir() or p.suffix.lower() in SUPPORTED_EXTS]
 
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
@@ -89,16 +116,18 @@ class App(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
         self.title("BB Image Converter")
-        self.geometry("640x580")
-        self.minsize(520, 440)
+        self.geometry("640x620")
+        self.minsize(520, 480)
         self.configure(bg=self.DARK)
         self.resizable(True, True)
 
-        self._fmt = StringVar(value="PNG")
+        self._fmt          = StringVar(value="PNG")
+        self._recursive    = BooleanVar(value=False)
+        self._delete_orig  = BooleanVar(value=False)
 
         self.update_idletasks()
         x = (self.winfo_screenwidth()  - 640) // 2
-        y = (self.winfo_screenheight() - 580) // 2
+        y = (self.winfo_screenheight() - 620) // 2
         self.geometry(f"+{x}+{y}")
 
         self._build_ui()
@@ -151,9 +180,32 @@ class App(TkinterDnD.Tk):
         self._accent_line = Frame(self, bg=self.ACCENT, height=2)
         self._accent_line.pack(fill=X)
 
+        # ── options row ─────────────────────────────────────────────────────
+        opts = Frame(self, bg=self.DARK)
+        opts.pack(fill=X, **pad, pady=(12, 0))
+
+        cb_kw = dict(
+            bg=self.DARK, fg=self.MUTED,
+            activebackground=self.DARK, activeforeground=self.TEXT,
+            selectcolor=self.CARD,
+            font=("Segoe UI", 9),
+            bd=0, highlightthickness=0,
+            cursor="hand2",
+        )
+
+        self._cb_recursive = Checkbutton(
+            opts, text="Include subfolders",
+            variable=self._recursive, **cb_kw)
+        self._cb_recursive.pack(side=LEFT)
+
+        self._cb_delete = Checkbutton(
+            opts, text="Delete originals after conversion",
+            variable=self._delete_orig, **cb_kw)
+        self._cb_delete.pack(side=LEFT, padx=(24, 0))
+
         # ── drop zone ───────────────────────────────────────────────────────
         dz_wrap = Frame(self, bg=self.DARK)
-        dz_wrap.pack(fill=X, **pad, pady=(20, 0))
+        dz_wrap.pack(fill=X, **pad, pady=(10, 0))
 
         self.drop_zone = Frame(
             dz_wrap, bg=self.CARD,
@@ -170,7 +222,7 @@ class App(TkinterDnD.Tk):
         self._arrow.pack(pady=(20, 4))
 
         self._drop_title = Label(inner,
-                                 text="Drop any image file here",
+                                 text="Drop images or folders here",
                                  font=("Segoe UI", 12, "bold"),
                                  bg=self.CARD, fg=self.TEXT)
         self._drop_title.pack()
@@ -249,7 +301,7 @@ class App(TkinterDnD.Tk):
         self._log_text.tag_config("head", foreground=self.YELLOW)
 
         self._ok_count = self._err_count = 0
-        self._log("Ready — drop any image file above.", "info")
+        self._log("Ready — drop images or folders above.", "info")
 
     # ── format selector ─────────────────────────────────────────────────────
 
@@ -294,22 +346,24 @@ class App(TkinterDnD.Tk):
 
     def _on_drop(self, event):
         self._on_leave(event)
-        files = parse_dropped(event.data)
+        raw = parse_dropped(event.data)
+        files = collect_files(raw, self._recursive.get())
         if not files:
             self._log("No supported image files found in drop.", "info")
             return
         fmt = self._fmt.get()
+        delete = self._delete_orig.get()
         threading.Thread(
             target=self._convert_batch,
-            args=(files, fmt),
+            args=(files, fmt, delete),
             daemon=True
         ).start()
 
-    def _convert_batch(self, files: list[Path], fmt: str):
+    def _convert_batch(self, files: list[Path], fmt: str, delete_original: bool):
         self.after(0, self._log,
                    f"── Converting {len(files)} file(s) to {fmt} ──", "head")
         for path in files:
-            ok, msg = convert_file(path, fmt)
+            ok, msg = convert_file(path, fmt, delete_original)
             self.after(0, self._log, msg, "ok" if ok else "err")
             self.after(0, self._bump, ok)
         self.after(0, self._log, "── Done ──", "info")
