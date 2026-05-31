@@ -10,7 +10,7 @@ from PIL import Image
 # All extensions Pillow can read, built at import time (e.g. .webp, .tga, .bmp, …)
 SUPPORTED_EXTS: frozenset[str] = frozenset(Image.registered_extensions().keys())
 
-# Output formats: name -> (file_ext, pillow_format, flatten_alpha, save_kwargs)
+# Output formats: name -> (file_ext, pillow_format, flatten_alpha, default_save_kwargs)
 #   flatten_alpha=True  → transparency is composited onto a white background
 #   flatten_alpha=False → alpha channel is preserved as-is
 OUTPUT_FORMATS: dict[str, tuple[str, str, bool, dict]] = {
@@ -22,6 +22,9 @@ OUTPUT_FORMATS: dict[str, tuple[str, str, bool, dict]] = {
     "TGA":  (".tga",  "TGA",  False, {}),
     "GIF":  (".gif",  "GIF",  True,  {}),
 }
+
+# Formats that expose compression controls in the UI
+COMP_FORMATS = {"JPEG", "WebP", "PNG", "TIFF"}
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -41,18 +44,22 @@ def collect_files(paths: list[Path], recursive: bool) -> list[Path]:
 
 
 def convert_file(src: Path, fmt: str,
-                 delete_original: bool = False) -> tuple[bool, str]:
+                 delete_original: bool = False,
+                 save_kwargs: dict | None = None) -> tuple[bool, str]:
     """Convert any Pillow-readable image to the chosen output format."""
     if src.suffix.lower() not in SUPPORTED_EXTS:
         return False, f"Skipped (unsupported format): {src.name}"
 
-    ext, pil_fmt, flatten, kwargs = OUTPUT_FORMATS[fmt]
+    ext, pil_fmt, flatten, default_kwargs = OUTPUT_FORMATS[fmt]
 
     # Skip if the file is already in the target format
     if src.suffix.lower() == ext:
         return False, f"Skipped (already {fmt}): {src.name}"
 
+    # UI-provided kwargs override the defaults
+    kwargs = {**default_kwargs, **(save_kwargs or {})}
     dst = src.with_suffix(ext)
+
     try:
         with Image.open(src) as img:
             if flatten:
@@ -116,18 +123,31 @@ class App(TkinterDnD.Tk):
     def __init__(self):
         super().__init__()
         self.title("BB Image Converter")
-        self.geometry("640x620")
-        self.minsize(520, 480)
+        self.geometry("640x660")
+        self.minsize(520, 500)
         self.configure(bg=self.DARK)
         self.resizable(True, True)
 
-        self._fmt          = StringVar(value="PNG")
-        self._recursive    = BooleanVar(value=False)
-        self._delete_orig  = BooleanVar(value=False)
+        # ── format ──────────────────────────────────────────────────────────
+        self._fmt         = StringVar(value="PNG")
+
+        # ── compression state ───────────────────────────────────────────────
+        self._jpeg_quality    = IntVar(value=95)
+        self._webp_quality    = IntVar(value=95)
+        self._webp_lossless   = BooleanVar(value=False)
+        self._png_compression = IntVar(value=6)
+        self._tiff_compression = StringVar(value="tiff_lzw")
+
+        # ── options ─────────────────────────────────────────────────────────
+        self._recursive   = BooleanVar(value=False)
+        self._delete_orig = BooleanVar(value=False)
+
+        # widget refs rebuilt on format change
+        self._tiff_btns: dict[str, Label] = {}
 
         self.update_idletasks()
         x = (self.winfo_screenwidth()  - 640) // 2
-        y = (self.winfo_screenheight() - 620) // 2
+        y = (self.winfo_screenheight() - 660) // 2
         self.geometry(f"+{x}+{y}")
 
         self._build_ui()
@@ -155,14 +175,14 @@ class App(TkinterDnD.Tk):
               font=("Segoe UI", 14, "bold")).pack(side=LEFT)
 
         # ── format bar ──────────────────────────────────────────────────────
-        fmt_bar = Frame(self, bg=self.PANEL)
-        fmt_bar.pack(fill=X)
+        self._fmt_bar = Frame(self, bg=self.PANEL)
+        self._fmt_bar.pack(fill=X)
 
-        Label(fmt_bar, text="Output format",
+        Label(self._fmt_bar, text="Output format",
               bg=self.PANEL, fg=self.MUTED,
               font=("Segoe UI", 8)).pack(side=LEFT, padx=(22, 10), pady=(0, 8))
 
-        pill = Frame(fmt_bar, bg=self.BORDER, padx=2, pady=2)
+        pill = Frame(self._fmt_bar, bg=self.BORDER, padx=2, pady=2)
         pill.pack(side=LEFT, pady=(0, 8))
 
         self._fmt_btns: dict[str, Label] = {}
@@ -175,6 +195,11 @@ class App(TkinterDnD.Tk):
             self._fmt_btns[name] = btn
 
         self._refresh_fmt_btns()
+
+        # ── compression options (dynamic, shown for JPEG/WebP/PNG/TIFF) ─────
+        self._comp_frame = Frame(self, bg=self.PANEL, padx=22)
+        # initial build — will pack itself if the default format needs it
+        self._update_comp_ui()
 
         # accent line
         self._accent_line = Frame(self, bg=self.ACCENT, height=2)
@@ -192,16 +217,10 @@ class App(TkinterDnD.Tk):
             bd=0, highlightthickness=0,
             cursor="hand2",
         )
-
-        self._cb_recursive = Checkbutton(
-            opts, text="Include subfolders",
-            variable=self._recursive, **cb_kw)
-        self._cb_recursive.pack(side=LEFT)
-
-        self._cb_delete = Checkbutton(
-            opts, text="Delete originals after conversion",
-            variable=self._delete_orig, **cb_kw)
-        self._cb_delete.pack(side=LEFT, padx=(24, 0))
+        Checkbutton(opts, text="Include subfolders",
+                    variable=self._recursive, **cb_kw).pack(side=LEFT)
+        Checkbutton(opts, text="Delete originals after conversion",
+                    variable=self._delete_orig, **cb_kw).pack(side=LEFT, padx=(24, 0))
 
         # ── drop zone ───────────────────────────────────────────────────────
         dz_wrap = Frame(self, bg=self.DARK)
@@ -310,6 +329,7 @@ class App(TkinterDnD.Tk):
         ext = OUTPUT_FORMATS[fmt][0]
         self._drop_sub.configure(text=f"{ext} saved next to originals")
         self._refresh_fmt_btns()
+        self._update_comp_ui()
 
     def _refresh_fmt_btns(self):
         current = self._fmt.get()
@@ -319,6 +339,141 @@ class App(TkinterDnD.Tk):
                 bg=self.ACCENT if active else self.CARD,
                 fg=self.TEXT   if active else self.MUTED,
             )
+
+    # ── compression UI ──────────────────────────────────────────────────────
+
+    def _update_comp_ui(self):
+        """Rebuild the compression row for the current format."""
+        for w in self._comp_frame.winfo_children():
+            w.destroy()
+        self._tiff_btns = {}
+
+        fmt = self._fmt.get()
+        builders = {
+            "JPEG": self._build_jpeg_comp,
+            "WebP": self._build_webp_comp,
+            "PNG":  self._build_png_comp,
+            "TIFF": self._build_tiff_comp,
+        }
+
+        if fmt in builders:
+            builders[fmt](self._comp_frame)
+            if not self._comp_frame.winfo_ismapped():
+                self._comp_frame.pack(after=self._fmt_bar, fill=X, pady=(0, 4))
+        else:
+            self._comp_frame.pack_forget()
+
+    def _make_slider(self, parent, label: str,
+                     var: IntVar, lo: int, hi: int) -> tuple[Frame, Scale, Label]:
+        """Create a labelled horizontal slider. Returns (row, scale, value_label)."""
+        row = Frame(parent, bg=self.PANEL)
+        row.pack(side=LEFT, padx=(0, 20))
+
+        Label(row, text=label, bg=self.PANEL, fg=self.MUTED,
+              font=("Segoe UI", 8)).pack(side=LEFT, padx=(0, 8))
+
+        sc = Scale(row, variable=var, from_=lo, to=hi,
+                   orient=HORIZONTAL, length=150, sliderlength=14,
+                   showvalue=False,
+                   bg=self.PANEL, troughcolor=self.BORDER,
+                   activebackground=self.ACCENT,
+                   highlightthickness=0, bd=0, relief=FLAT)
+        sc.pack(side=LEFT)
+
+        val_lbl = Label(row, text=str(var.get()), width=3, anchor=W,
+                        bg=self.PANEL, fg=self.TEXT,
+                        font=("Segoe UI", 9, "bold"))
+        val_lbl.pack(side=LEFT, padx=(6, 0))
+        var.trace_add("write", lambda *_: val_lbl.configure(text=str(var.get())))
+
+        return row, sc, val_lbl
+
+    def _build_jpeg_comp(self, parent):
+        inner = Frame(parent, bg=self.PANEL)
+        inner.pack(fill=X, pady=6)
+        self._make_slider(inner, "Quality", self._jpeg_quality, 1, 95)
+
+    def _build_webp_comp(self, parent):
+        inner = Frame(parent, bg=self.PANEL)
+        inner.pack(fill=X, pady=6)
+
+        cb_kw = dict(bg=self.PANEL, fg=self.MUTED,
+                     activebackground=self.PANEL, activeforeground=self.TEXT,
+                     selectcolor=self.CARD, font=("Segoe UI", 9),
+                     bd=0, highlightthickness=0, cursor="hand2")
+
+        _, sc, val_lbl = self._make_slider(
+            inner, "Quality", self._webp_quality, 1, 100)
+
+        def _toggle_lossless():
+            is_lossless = self._webp_lossless.get()
+            sc.configure(state=DISABLED if is_lossless else NORMAL)
+            val_lbl.configure(fg=self.MUTED if is_lossless else self.TEXT)
+
+        Checkbutton(inner, text="Lossless",
+                    variable=self._webp_lossless,
+                    command=_toggle_lossless,
+                    **cb_kw).pack(side=LEFT, padx=(0, 4))
+
+        _toggle_lossless()  # apply initial state
+
+    def _build_png_comp(self, parent):
+        inner = Frame(parent, bg=self.PANEL)
+        inner.pack(fill=X, pady=6)
+        self._make_slider(inner, "Compression", self._png_compression, 0, 9)
+        Label(inner, text="0 = fast   9 = smallest",
+              bg=self.PANEL, fg=self.MUTED,
+              font=("Segoe UI", 7)).pack(side=LEFT, padx=(4, 0))
+
+    def _build_tiff_comp(self, parent):
+        inner = Frame(parent, bg=self.PANEL)
+        inner.pack(fill=X, pady=6)
+
+        Label(inner, text="Compression",
+              bg=self.PANEL, fg=self.MUTED,
+              font=("Segoe UI", 8)).pack(side=LEFT, padx=(0, 10))
+
+        pill = Frame(inner, bg=self.BORDER, padx=2, pady=2)
+        pill.pack(side=LEFT)
+
+        options = [("None", "raw"), ("LZW", "tiff_lzw"), ("Deflate", "tiff_deflate")]
+        self._tiff_btns = {}
+        for label, value in options:
+            btn = Label(pill, text=f"  {label}  ",
+                        font=("Segoe UI", 9, "bold"),
+                        pady=3, cursor="hand2")
+            btn.pack(side=LEFT)
+            btn.bind("<Button-1>", lambda _, v=value: self._set_tiff_compression(v))
+            self._tiff_btns[value] = btn
+
+        self._refresh_tiff_btns()
+
+    def _set_tiff_compression(self, value: str):
+        self._tiff_compression.set(value)
+        self._refresh_tiff_btns()
+
+    def _refresh_tiff_btns(self):
+        current = self._tiff_compression.get()
+        for value, btn in self._tiff_btns.items():
+            active = value == current
+            btn.configure(
+                bg=self.ACCENT if active else self.CARD,
+                fg=self.TEXT   if active else self.MUTED,
+            )
+
+    def _get_save_kwargs(self, fmt: str) -> dict:
+        """Build save kwargs from current UI state for the given format."""
+        if fmt == "JPEG":
+            return {"quality": self._jpeg_quality.get()}
+        if fmt == "WebP":
+            if self._webp_lossless.get():
+                return {"lossless": True}
+            return {"quality": self._webp_quality.get(), "lossless": False}
+        if fmt == "PNG":
+            return {"compress_level": self._png_compression.get()}
+        if fmt == "TIFF":
+            return {"compression": self._tiff_compression.get()}
+        return {}
 
     # ── drag feedback ────────────────────────────────────────────────────────
 
@@ -351,19 +506,21 @@ class App(TkinterDnD.Tk):
         if not files:
             self._log("No supported image files found in drop.", "info")
             return
-        fmt = self._fmt.get()
+        fmt    = self._fmt.get()
         delete = self._delete_orig.get()
+        kwargs = self._get_save_kwargs(fmt)
         threading.Thread(
             target=self._convert_batch,
-            args=(files, fmt, delete),
+            args=(files, fmt, delete, kwargs),
             daemon=True
         ).start()
 
-    def _convert_batch(self, files: list[Path], fmt: str, delete_original: bool):
+    def _convert_batch(self, files: list[Path], fmt: str,
+                       delete_original: bool, save_kwargs: dict):
         self.after(0, self._log,
                    f"── Converting {len(files)} file(s) to {fmt} ──", "head")
         for path in files:
-            ok, msg = convert_file(path, fmt, delete_original)
+            ok, msg = convert_file(path, fmt, delete_original, save_kwargs)
             self.after(0, self._log, msg, "ok" if ok else "err")
             self.after(0, self._bump, ok)
         self.after(0, self._log, "── Done ──", "info")
