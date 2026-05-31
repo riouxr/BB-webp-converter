@@ -132,7 +132,7 @@ class App(TkinterDnD.Tk):
         self._fmt         = StringVar(value="PNG")
 
         # ── compression state ───────────────────────────────────────────────
-        self._jpeg_quality    = IntVar(value=95)
+        self._jpeg_quality    = IntVar(value=95)  # 95 is the sweet spot; 96–100 = near-lossless but huge files
         self._webp_quality    = IntVar(value=95)
         self._webp_lossless   = BooleanVar(value=False)
         self._png_compression = IntVar(value=6)
@@ -391,7 +391,7 @@ class App(TkinterDnD.Tk):
     def _build_jpeg_comp(self, parent):
         inner = Frame(parent, bg=self.PANEL)
         inner.pack(fill=X, pady=6)
-        self._make_slider(inner, "Quality", self._jpeg_quality, 1, 95)
+        self._make_slider(inner, "Quality", self._jpeg_quality, 1, 100)
 
     def _build_webp_comp(self, parent):
         inner = Frame(parent, bg=self.PANEL)
